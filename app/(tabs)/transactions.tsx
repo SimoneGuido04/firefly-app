@@ -1,12 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, RefreshControl, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { transactionsApi } from '../../lib/api';
 import { formatCurrency, formatDate } from '../../lib/helpers';
-import { useThemeStore } from '../../store/themeStore';
 import { useRefreshStore } from '../../store/refreshStore';
+import { useThemeStore } from '../../store/themeStore';
 
 type FilterType = 'all' | 'withdrawal' | 'deposit' | 'transfer';
 
@@ -19,18 +19,34 @@ export default function TransactionsScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [filter, setFilter] = useState<FilterType>('all');
     const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
 
-    const load = useCallback(async (p = 1) => {
+    const load = useCallback(async (p = 1, append = false) => {
         try {
             const type = filter === 'all' ? undefined : filter;
             const res = await transactionsApi.list(p, undefined, undefined, type as any);
-            if (res.data?.data) setTransactions(res.data.data);
+            if (res.data?.data) {
+                const newItems = res.data.data;
+                if (append) setTransactions(prev => [...prev, ...newItems]);
+                else setTransactions(newItems);
+                setHasMore(newItems.length >= 50);
+                setPage(p);
+            } else {
+                setHasMore(false);
+            }
         } catch (e) { console.error(e); }
-        finally { setLoading(false); }
+        finally { setLoading(false); setLoadingMore(false); }
     }, [filter]);
 
-    useEffect(() => { setLoading(true); load(1); }, [filter, load, refreshKey]);
-    const onRefresh = async () => { setRefreshing(true); await load(1); setRefreshing(false); };
+    useEffect(() => { setLoading(true); setPage(1); setHasMore(true); load(1); }, [filter, load, refreshKey]);
+    const onRefresh = async () => { setRefreshing(true); setPage(1); setHasMore(true); await load(1); setRefreshing(false); };
+    const loadMore = () => {
+        if (!hasMore || loadingMore || loading) return;
+        setLoadingMore(true);
+        load(page + 1, true);
+    };
 
     const getTxIcon = (type: string) => type === 'withdrawal' ? 'shopping-cart' : type === 'deposit' ? 'payments' : 'sync-alt';
     const getTxColors = (type: string) => {
@@ -76,7 +92,12 @@ export default function TransactionsScreen() {
             {loading ? (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color={c.primary} /></View>
             ) : (
-                <ScrollView contentContainerStyle={{ paddingBottom: 90 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>
+                <ScrollView contentContainerStyle={{ paddingBottom: 90 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
+                    onScroll={({ nativeEvent }) => {
+                        const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+                        if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 200) loadMore();
+                    }}
+                    scrollEventThrottle={400}>
                     {Object.keys(grouped).length === 0 ? (
                         <Text style={{ color: c.textMuted, textAlign: 'center', padding: 40, fontSize: 14 }}>Nessuna transazione trovata</Text>
                     ) : Object.entries(grouped).map(([date, txs]) => (
@@ -105,6 +126,7 @@ export default function TransactionsScreen() {
                             })}
                         </View>
                     ))}
+                    {loadingMore && <ActivityIndicator size="small" color={c.primary} style={{ paddingVertical: 16 }} />}
                 </ScrollView>
             )}
 

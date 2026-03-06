@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { budgetsApi } from '../../lib/api';
-import { formatCurrency, firstOfMonthStr, lastOfMonthStr } from '../../lib/helpers';
-import { useThemeStore } from '../../store/themeStore';
+import { firstOfMonthStr, formatCurrency, lastOfMonthStr } from '../../lib/helpers';
 import { useRefreshStore } from '../../store/refreshStore';
+import { useThemeStore } from '../../store/themeStore';
 
 const COLORS = ['#f97316', '#3b82f6', '#ef4444', '#a855f7', '#10b981', '#f59e0b', '#ec4899', '#06b6d4'];
 
@@ -24,19 +24,22 @@ export default function BudgetScreen() {
             if (res.data?.data) {
                 const start = firstOfMonthStr();
                 const end = lastOfMonthStr();
+                const budgetData = res.data.data;
+                const limitResults = await Promise.all(
+                    budgetData.map((b: any) =>
+                        budgetsApi.limits(b.id, start, end).catch(() => ({ data: { data: [] } }))
+                    )
+                );
                 const items: any[] = [];
                 let tSpent = 0, tBudget = 0;
-                for (const b of res.data.data) {
-                    try {
-                        const limitsRes = await budgetsApi.limits(b.id, start, end);
-                        const limits = limitsRes.data?.data || [];
-                        const limit = limits[0];
-                        const budgeted = limit ? parseFloat(limit.attributes.amount) : 0;
-                        const spent = limit ? Math.abs(parseFloat(limit.attributes.spent?.[0]?.sum || '0')) : 0;
-                        items.push({ id: b.id, name: b.attributes.name, budgeted, spent });
-                        tSpent += spent; tBudget += budgeted;
-                    } catch { items.push({ id: b.id, name: b.attributes.name, budgeted: 0, spent: 0 }); }
-                }
+                budgetData.forEach((b: any, i: number) => {
+                    const limits = limitResults[i]?.data?.data || [];
+                    const limit = limits[0];
+                    const budgeted = limit ? parseFloat(limit.attributes.amount) : 0;
+                    const spent = limit ? Math.abs(parseFloat(limit.attributes.spent?.[0]?.sum || '0')) : 0;
+                    items.push({ id: b.id, name: b.attributes.name, budgeted, spent });
+                    tSpent += spent; tBudget += budgeted;
+                });
                 setBudgets(items); setTotalSpent(tSpent); setTotalBudgeted(tBudget);
             }
         } catch (e) { console.error(e); }

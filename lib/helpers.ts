@@ -16,11 +16,14 @@ export function lastOfMonthStr(): string {
 
 export function formatCurrency(amount: number | string, currency = '€'): string {
     const n = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(n) || n == null) return `${currency} 0,00`;
     return `${currency} ${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function formatDate(dateStr: string): string {
+    if (!dateStr) return '—';
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
     const today = new Date();
     const yesterday = new Date();
     yesterday.setDate(today.getDate() - 1);

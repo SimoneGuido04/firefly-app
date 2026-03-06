@@ -1,12 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { summaryApi, transactionsApi, accountsApi } from '../../lib/api';
-import { firstOfMonthStr, lastOfMonthStr, formatCurrency, formatDate } from '../../lib/helpers';
-import { useThemeStore } from '../../store/themeStore';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { accountsApi, billsApi, summaryApi, transactionsApi } from '../../lib/api';
+import { firstOfMonthStr, formatCurrency, formatDate, lastOfMonthStr } from '../../lib/helpers';
 import { useRefreshStore } from '../../store/refreshStore';
+import { useThemeStore } from '../../store/themeStore';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -18,6 +18,7 @@ export default function DashboardScreen() {
   const [earned, setEarned] = useState('0');
   const [spent, setSpent] = useState('0');
   const [recentTx, setRecentTx] = useState<any[]>([]);
+  const [pendingBills, setPendingBills] = useState<any[]>([]);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -25,23 +26,31 @@ export default function DashboardScreen() {
       setError('');
       const start = firstOfMonthStr();
       const end = lastOfMonthStr();
-      const [summaryRes, txRes, accountsRes] = await Promise.all([
+      const [summaryRes, txRes, accountsRes, billsRes] = await Promise.all([
         summaryApi.basic(start, end).catch(() => null),
         transactionsApi.list(1, start, end).catch(() => null),
         accountsApi.list('asset', 1).catch(() => null),
+        billsApi.list(1, start, end).catch(() => null),
       ]);
       if (summaryRes?.data) {
         const d = summaryRes.data;
+        let totalSpent = 0, totalEarned = 0;
         for (const key of Object.keys(d)) {
-          if (key.startsWith('spent-in-')) setSpent(d[key]?.monetary_value || '0');
-          if (key.startsWith('earned-in-')) setEarned(d[key]?.monetary_value || '0');
+          if (key.startsWith('spent-in-')) totalSpent += parseFloat(d[key]?.monetary_value || '0');
+          if (key.startsWith('earned-in-')) totalEarned += parseFloat(d[key]?.monetary_value || '0');
         }
+        setSpent(String(totalSpent));
+        setEarned(String(totalEarned));
       }
       if (accountsRes?.data?.data) {
         const total = accountsRes.data.data
           .filter((acc: any) => acc.attributes.include_net_worth !== false)
           .reduce((sum: number, acc: any) => sum + parseFloat(acc.attributes.current_balance || '0'), 0);
         setBalance(String(total));
+      }
+      if (billsRes?.data?.data) {
+        // Find bills that don't have paid_dates for this month
+        setPendingBills(billsRes.data.data.filter((b: any) => !b.attributes.paid_dates?.length));
       }
       if (txRes?.data?.data) setRecentTx(txRes.data.data.slice(0, 5));
     } catch (e: any) { setError('Errore nel caricamento dati'); console.error(e); }
@@ -98,6 +107,46 @@ export default function DashboardScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Pending Bills Widget */}
+        {pendingBills.length > 0 && (
+          <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ color: c.text, fontSize: 16, fontWeight: '700' }}>Da Pagare</Text>
+              <View style={{ backgroundColor: c.warning + '26', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                <Text style={{ color: c.warning, fontSize: 11, fontWeight: '700' }}>{pendingBills.length} in sospeso</Text>
+              </View>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+              {pendingBills.map(bill => {
+                const a = bill.attributes;
+                const avg = (parseFloat(a.amount_min || '0') + parseFloat(a.amount_max || '0')) / 2;
+                return (
+                  <TouchableOpacity
+                    key={bill.id}
+                    onPress={() => router.push('/bills')}
+                    style={{ backgroundColor: c.bgCard, borderRadius: 14, borderWidth: 1, borderColor: c.border, padding: 14, width: 160 }}
+                  >
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: c.warning + '1A', alignItems: 'center', justifyContent: 'center' }}>
+                        <MaterialIcons name="receipt-long" size={18} color={c.warning} />
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => router.push(`/new-transaction?billId=${bill.id}&billName=${encodeURIComponent(a.name)}&amount=${avg}` as any)}
+                        style={{ backgroundColor: c.success + '22', width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <MaterialIcons name="done" size={16} color={c.success} />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={{ color: c.text, fontSize: 14, fontWeight: '700', marginBottom: 2 }} numberOfLines={1}>{a.name}</Text>
+                    <Text style={{ color: c.text, fontSize: 16, fontWeight: '800' }}>{formatCurrency(avg)}</Text>
+                    <Text style={{ color: c.textSecondary, fontSize: 11, marginTop: 4 }}>Scade: {a.next_expected_match ? formatDate(a.next_expected_match) : 'N/D'}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Monthly Summary */}
         <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
@@ -156,12 +205,7 @@ export default function DashboardScreen() {
             })}
           </View>
         </View>
-        <View style={{ height: 90 }} />
       </ScrollView>
-
-      <TouchableOpacity style={{ position: 'absolute', bottom: 90, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 8 }} onPress={() => router.push('/new-transaction')}>
-        <MaterialIcons name="add" size={28} color="white" />
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }

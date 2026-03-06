@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { accountsApi } from '../../lib/api';
 import { formatCurrency } from '../../lib/helpers';
-import { useThemeStore } from '../../store/themeStore';
 import { useRefreshStore } from '../../store/refreshStore';
+import { useThemeStore } from '../../store/themeStore';
 
 type Tab = 'asset' | 'expense' | 'revenue';
 
@@ -29,6 +29,8 @@ export default function AccountsScreen() {
                         .filter((a: any) => a.attributes.include_net_worth !== false)
                         .reduce((s: number, a: any) => s + parseFloat(a.attributes.current_balance || '0'), 0);
                     setTotalBalance(total);
+                } else {
+                    setTotalBalance(0);
                 }
             }
         } catch (e) { console.error(e); }

@@ -1,20 +1,29 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { accountsApi, categoriesApi, transactionsApi } from '../../lib/api';
-import { formatCurrency, formatDate } from '../../lib/helpers';
+import { accountsApi, categoriesApi, recurringApi } from '../../lib/api';
+import { formatCurrency, formatDate, todayStr } from '../../lib/helpers';
 import { useRefreshStore } from '../../store/refreshStore';
 import { useThemeStore } from '../../store/themeStore';
 
-export default function TransactionDetailScreen() {
+const REPEAT_FREQS = [
+    { key: 'daily', label: 'Giornaliera' },
+    { key: 'weekly', label: 'Settimanale' },
+    { key: 'monthly', label: 'Mensile' },
+    { key: 'quarterly', label: 'Trimestrale' },
+    { key: 'half-year', label: 'Semestrale' },
+    { key: 'yearly', label: 'Annuale' },
+];
+
+export default function RecurringDetailScreen() {
     const router = useRouter();
     const { id } = useLocalSearchParams<{ id: string }>();
     const { colors: c } = useThemeStore();
     const triggerRefresh = useRefreshStore(s => s.triggerRefresh);
 
-    const [tx, setTx] = useState<any>(null);
+    const [rec, setRec] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -22,16 +31,18 @@ export default function TransactionDetailScreen() {
 
     // Edit state
     const [editType, setEditType] = useState<'withdrawal' | 'deposit' | 'transfer'>('withdrawal');
+    const [editTitle, setEditTitle] = useState('');
     const [editDesc, setEditDesc] = useState('');
     const [editAmount, setEditAmount] = useState('');
-    const [editDate, setEditDate] = useState('');
     const [editCategory, setEditCategory] = useState('');
     const [editNotes, setEditNotes] = useState('');
-    const [editTags, setEditTags] = useState('');
     const [editSourceId, setEditSourceId] = useState('');
-    const [editSourceName, setEditSourceName] = useState('');
     const [editDestName, setEditDestName] = useState('');
-    const [editDestId, setEditDestId] = useState('');
+
+    // Recurrence specfic state
+    const [editFirstDate, setEditFirstDate] = useState('');
+    const [editRepeatFreq, setEditRepeatFreq] = useState('monthly');
+    const [editActive, setEditActive] = useState(true);
 
     // Lists for pickers
     const [accounts, setAccounts] = useState<any[]>([]);
@@ -40,48 +51,56 @@ export default function TransactionDetailScreen() {
     const load = useCallback(async () => {
         if (!id) return;
         try {
-            const [txRes, accRes, catRes] = await Promise.all([
-                transactionsApi.get(id),
+            const [recRes, accRes, catRes] = await Promise.all([
+                recurringApi.get(id),
                 accountsApi.list('asset'),
                 categoriesApi.list(),
             ]);
             if (accRes.data?.data) setAccounts(accRes.data.data);
             if (catRes.data?.data) setCategories(catRes.data.data);
-            if (txRes.data?.data) {
-                const data = txRes.data.data;
-                setTx(data);
-                const t = data.attributes.transactions[0];
-                setEditType(t.type || 'withdrawal');
-                setEditDesc(t.description || '');
-                setEditAmount(t.amount ? parseFloat(t.amount).toString() : '');
-                setEditDate(t.date?.split('T')[0] || '');
-                setEditCategory(t.category_name || '');
-                setEditNotes(t.notes || '');
-                setEditTags(t.tags?.map((tg: any) => typeof tg === 'string' ? tg : tg.tag).join(', ') || '');
-                setEditSourceId(t.source_id?.toString() || '');
-                setEditSourceName(t.source_name || '');
-                setEditDestName(t.destination_name || '');
-                setEditDestId(t.destination_id?.toString() || '');
+            if (recRes.data?.data) {
+                const data = recRes.data.data;
+                setRec(data);
+                const a = data.attributes;
+                const tx = a.transactions?.[0];
+
+                setEditTitle(a.title || '');
+                setEditFirstDate(a.first_date?.split('T')[0] || todayStr());
+                setEditRepeatFreq(a.repeat_freq || a.repetitions?.[0]?.type || 'monthly');
+                setEditActive(a.active || false);
+                setEditNotes(a.notes || '');
+
+                if (tx) {
+                    setEditType(a.type || tx.type || 'withdrawal');
+                    setEditDesc(tx.description || '');
+                    setEditAmount(tx.amount ? parseFloat(tx.amount).toString() : a.amount ? parseFloat(a.amount).toString() : '');
+                    setEditCategory(tx.category_name || '');
+                    setEditSourceId(tx.source_id?.toString() || '');
+                    setEditDestName(tx.destination_name || tx.source_name || '');
+                } else {
+                    setEditDesc(a.title || '');
+                }
             }
-        } catch (e) { console.error(e); }
-        finally { setLoading(false); }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
     }, [id]);
 
     useEffect(() => { load(); }, [load]);
 
     const handleSave = async () => {
-        if (!tx) return;
+        if (!rec) return;
+        if (!editTitle.trim()) { Alert.alert('Errore', 'Inserisci un titolo'); return; }
         if (!editAmount || parseFloat(editAmount) <= 0) { Alert.alert('Errore', 'Importo non valido'); return; }
-        if (!editDesc.trim()) { Alert.alert('Errore', 'Descrizione richiesta'); return; }
+        if (editType !== 'deposit' && !editSourceId) { Alert.alert('Errore', 'Seleziona un conto'); return; }
         setSaving(true);
         try {
             const txData: any = {
                 type: editType,
-                description: editDesc,
+                description: editDesc || editTitle,
                 amount: editAmount.replace(',', '.'),
-                date: editDate,
-                tags: editTags ? editTags.split(',').map(t => t.trim()) : [],
-                notes: editNotes || undefined,
             };
             if (editType === 'withdrawal') {
                 txData.source_id = editSourceId;
@@ -93,31 +112,44 @@ export default function TransactionDetailScreen() {
                 if (editCategory) txData.category_name = editCategory;
             } else {
                 txData.source_id = editSourceId;
-                txData.destination_id = editDestId || undefined;
-                txData.destination_name = editDestId ? undefined : (editDestName || 'Unknown');
+                txData.destination_name = editDestName || 'Unknown';
             }
-            await transactionsApi.update(tx.id, { transactions: [txData] });
+
+            const dataToUpdate = {
+                title: editTitle.trim(),
+                first_date: editFirstDate,
+                repeat_freq: editRepeatFreq,
+                notes: editNotes || undefined,
+                active: editActive,
+                apply_rules: true,
+                transactions: [txData],
+                repetitions: [{ type: editRepeatFreq, moment: '' }],
+            };
+
+            await recurringApi.update(rec.id, dataToUpdate);
             triggerRefresh();
-            Alert.alert('Successo', 'Transazione aggiornata!');
+            Alert.alert('Successo', 'Ricorrenza aggiornata!');
             setEditing(false);
             setLoading(true);
             await load();
         } catch (e: any) {
             console.error(e?.response?.data || e);
             Alert.alert('Errore', e?.response?.data?.message || 'Impossibile aggiornare');
-        } finally { setSaving(false); }
+        } finally {
+            setSaving(false);
+        }
     };
 
     const handleDelete = () => {
-        Alert.alert('Elimina transazione', 'Sei sicuro? Questa azione non può essere annullata.', [
+        Alert.alert('Elimina ricorrenza', 'Sei sicuro? Questa azione non fermerà le transazioni passate ma impedirà quelle future.', [
             { text: 'Annulla', style: 'cancel' },
             {
                 text: 'Elimina', style: 'destructive', onPress: async () => {
                     setDeleting(true);
                     try {
-                        await transactionsApi.delete(tx.id);
+                        await recurringApi.delete(rec.id);
                         triggerRefresh();
-                        Alert.alert('Eliminata', 'Transazione eliminata.', [{ text: 'OK', onPress: () => router.back() }]);
+                        Alert.alert('Eliminata', 'Ricorrenza eliminata.', [{ text: 'OK', onPress: () => router.back() }]);
                     } catch (e: any) {
                         Alert.alert('Errore', e?.response?.data?.message || 'Impossibile eliminare');
                     } finally { setDeleting(false); }
@@ -132,18 +164,19 @@ export default function TransactionDetailScreen() {
         </View>
     );
 
-    if (!tx) return (
+    if (!rec) return (
         <SafeAreaView style={{ flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' }}>
             <MaterialIcons name="error-outline" size={48} color={c.danger} />
-            <Text style={{ color: c.text, fontSize: 16, marginTop: 12 }}>Transazione non trovata</Text>
+            <Text style={{ color: c.text, fontSize: 16, marginTop: 12 }}>Ricorrenza non trovata</Text>
             <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
                 <Text style={{ color: c.primary, fontSize: 14, fontWeight: '700' }}>Torna indietro</Text>
             </TouchableOpacity>
         </SafeAreaView>
     );
 
-    const t = tx.attributes.transactions[0];
-    const type = t.type;
+    const a = rec.attributes;
+    const t = a.transactions?.[0];
+    const type = a.type || t?.type || 'withdrawal';
     const isExpense = type === 'withdrawal';
     const isDeposit = type === 'deposit';
     const amountColor = isExpense ? c.danger : isDeposit ? c.success : c.textSecondary;
@@ -157,24 +190,29 @@ export default function TransactionDetailScreen() {
         { key: 'transfer' as const, label: 'Trasferimento', icon: 'sync-alt', color: c.textSecondary },
     ];
 
+    const getFreqLabel = (freq: string) => {
+        const item = REPEAT_FREQS.find(f => f.key === freq);
+        return item ? item.label : freq;
+    };
+
     // ============ EDIT MODE ============
     if (editing) {
         const editAmountColor = editType === 'withdrawal' ? c.danger : editType === 'deposit' ? c.success : c.primary;
         return (
             <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+                <Stack.Screen options={{ headerShown: false }} />
                 <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.bgCard, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border }}>
                         <TouchableOpacity onPress={() => setEditing(false)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
                             <MaterialIcons name="close" size={24} color={c.text} />
                         </TouchableOpacity>
-                        <Text style={{ color: c.text, fontSize: 17, fontWeight: '700' }}>Modifica Transazione</Text>
+                        <Text style={{ color: c.text, fontSize: 17, fontWeight: '700' }}>Modifica Ricorrenza</Text>
                         <TouchableOpacity onPress={handleSave} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }} disabled={saving}>
                             {saving ? <ActivityIndicator size="small" color={c.primary} /> : <MaterialIcons name="check" size={24} color={c.primary} />}
                         </TouchableOpacity>
                     </View>
 
                     <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
-                        {/* Amount Hero */}
                         <View style={{ backgroundColor: c.primaryBg, paddingVertical: 32, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: c.border }}>
                             <Text style={{ color: c.textSecondary, fontSize: 13, marginBottom: 4 }}>Importo</Text>
                             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -184,7 +222,6 @@ export default function TransactionDetailScreen() {
                             </View>
                         </View>
 
-                        {/* Type Selector */}
                         <View style={{ flexDirection: 'row', gap: 8, padding: 16 }}>
                             {TYPES.map(tp => (
                                 <TouchableOpacity key={tp.key} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: editType === tp.key ? tp.color : c.border, backgroundColor: editType === tp.key ? tp.color + '22' : c.bgCard }} onPress={() => setEditType(tp.key)}>
@@ -195,16 +232,32 @@ export default function TransactionDetailScreen() {
                         </View>
 
                         <View style={{ paddingHorizontal: 16, gap: 16, paddingBottom: 24 }}>
-                            {/* Description */}
+                            {/* Title & Desc */}
                             <View style={{ gap: 8 }}>
-                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Descrizione</Text>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Titolo Ricorrenza</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                    <MaterialIcons name="title" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Titolo" placeholderTextColor={c.textMuted} value={editTitle} onChangeText={setEditTitle} />
+                                </View>
+                            </View>
+                            <View style={{ gap: 8 }}>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Descrizione transazione</Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
                                     <MaterialIcons name="edit" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Descrizione" placeholderTextColor={c.textMuted} value={editDesc} onChangeText={setEditDesc} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Descrizione transazione" placeholderTextColor={c.textMuted} value={editDesc} onChangeText={setEditDesc} />
                                 </View>
                             </View>
 
-                            {/* Account Selector */}
+                            {/* Active Toggle */}
+                            <TouchableOpacity onPress={() => setEditActive(!editActive)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.bgCard, borderRadius: 12, borderWidth: 1, borderColor: c.border, padding: 14 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                    <MaterialIcons name={editActive ? "check-circle" : "pause-circle-outline"} size={22} color={editActive ? c.success : c.textMuted} />
+                                    <Text style={{ color: c.text, fontSize: 15, fontWeight: '600' }}>{editActive ? 'Attiva' : 'Inattiva'}</Text>
+                                </View>
+                                <Text style={{ color: c.textSecondary, fontSize: 12 }}>{editActive ? 'Verrà processata' : 'In pausa'}</Text>
+                            </TouchableOpacity>
+
+                            {/* Account & Category */}
                             <View style={{ gap: 8 }}>
                                 <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{editType === 'deposit' ? 'Conto destinazione' : 'Conto di origine'}</Text>
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
@@ -216,16 +269,14 @@ export default function TransactionDetailScreen() {
                                 </ScrollView>
                             </View>
 
-                            {/* Destination */}
                             <View style={{ gap: 8 }}>
                                 <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{editType === 'deposit' ? 'Provenienza' : editType === 'transfer' ? 'Conto destinazione' : 'Destinazione spesa'}</Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
                                     <MaterialIcons name="shopping-cart" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Es. Supermercato" placeholderTextColor={c.textMuted} value={editDestName} onChangeText={setEditDestName} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Es. Netflix" placeholderTextColor={c.textMuted} value={editDestName} onChangeText={setEditDestName} />
                                 </View>
                             </View>
 
-                            {/* Category */}
                             {editType !== 'transfer' && (
                                 <View style={{ gap: 8 }}>
                                     <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Categoria</Text>
@@ -242,19 +293,26 @@ export default function TransactionDetailScreen() {
                                 </View>
                             )}
 
-                            {/* Date & Tags */}
-                            {[
-                                { label: 'Data', icon: 'calendar-today', value: editDate, set: setEditDate, placeholder: 'YYYY-MM-DD' },
-                                { label: 'Tag', icon: 'sell', value: editTags, set: setEditTags, placeholder: 'Separati da virgola' },
-                            ].map(f => (
-                                <View key={f.label} style={{ gap: 8 }}>
-                                    <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{f.label}</Text>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
-                                        <MaterialIcons name={f.icon as any} size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                        <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder={f.placeholder} placeholderTextColor={c.textMuted} value={f.value} onChangeText={f.set} />
-                                    </View>
+                            {/* Frequency */}
+                            <View style={{ gap: 8 }}>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Frequenza</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                    {REPEAT_FREQS.map(f => (
+                                        <TouchableOpacity key={f.key} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: editRepeatFreq === f.key ? c.primary : c.border, backgroundColor: editRepeatFreq === f.key ? c.primary : c.bgCard }} onPress={() => setEditRepeatFreq(f.key)}>
+                                            <Text style={{ color: editRepeatFreq === f.key ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>{f.label}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
+
+                            {/* Start date */}
+                            <View style={{ gap: 8 }}>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Prima data di inizio</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                    <MaterialIcons name={'calendar-today'} size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder={'YYYY-MM-DD'} placeholderTextColor={c.textMuted} value={editFirstDate} onChangeText={setEditFirstDate} />
                                 </View>
-                            ))}
+                            </View>
 
                             {/* Notes */}
                             <View style={{ gap: 8 }}>
@@ -264,10 +322,10 @@ export default function TransactionDetailScreen() {
                                     <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: 60, textAlignVertical: 'top' }} placeholder="Note aggiuntive..." placeholderTextColor={c.textMuted} value={editNotes} onChangeText={setEditNotes} multiline />
                                 </View>
                             </View>
+
                         </View>
                     </ScrollView>
 
-                    {/* Save Button */}
                     <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: 32, backgroundColor: c.bg + 'F2', borderTopWidth: 1, borderTopColor: c.border }}>
                         <TouchableOpacity style={[{ backgroundColor: c.primary, height: 52, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, elevation: 6 }, saving && { opacity: 0.6 }]} onPress={handleSave} disabled={saving}>
                             {saving ? <ActivityIndicator color="white" /> : <><MaterialIcons name="save" size={20} color="white" /><Text style={{ color: 'white', fontWeight: '700', fontSize: 15 }}>Salva Modifiche</Text></>}
@@ -293,82 +351,65 @@ export default function TransactionDetailScreen() {
 
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+            <Stack.Screen options={{ headerShown: false }} />
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.bgCard, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.border }}>
                 <TouchableOpacity onPress={() => router.back()} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
                     <MaterialIcons name="arrow-back" size={24} color={c.text} />
                 </TouchableOpacity>
                 <Text style={{ color: c.text, fontSize: 17, fontWeight: '700' }}>Dettaglio</Text>
                 <TouchableOpacity onPress={() => setEditing(true)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-                    <MaterialIcons name="edit" size={22} color={c.primary} />
+                    <MaterialIcons name="edit" size={24} color={c.primary} />
                 </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-                {/* Amount Hero */}
-                <View style={{ alignItems: 'center', paddingVertical: 32, backgroundColor: c.bgCard, borderBottomWidth: 1, borderBottomColor: c.border }}>
-                    <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: amountColor + '1A', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
+                {/* Header */}
+                <View style={{ backgroundColor: c.bgCard, padding: 24, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: c.border }}>
+                    <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: amountColor + '1A', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
                         <MaterialIcons name={typeIcon as any} size={32} color={amountColor} />
                     </View>
-                    <Text style={{ color: amountColor, fontSize: 36, fontWeight: '800' }}>
-                        {amountPrefix} {formatCurrency(t.amount, t.currency_symbol || '€')}
+                    <Text style={{ color: amountColor, fontSize: 32, fontWeight: '800', marginBottom: 6 }}>
+                        {amountPrefix}{formatCurrency(t?.amount || 0)}
                     </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
-                        <View style={{ backgroundColor: amountColor + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
-                            <Text style={{ color: amountColor, fontSize: 12, fontWeight: '700' }}>{typeLabel}</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {/* Details */}
-                <View style={{ backgroundColor: c.bgCard, marginTop: 12, marginHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: c.border, paddingHorizontal: 16 }}>
-                    <InfoRow icon="edit" label="Descrizione" value={t.description} />
-                    <InfoRow icon="calendar-today" label="Data" value={formatDate(t.date)} />
-                    <InfoRow icon="account-balance" label="Conto di origine" value={t.source_name} />
-                    <InfoRow icon="store" label="Destinazione" value={t.destination_name} />
-                    <InfoRow icon="category" label="Categoria" value={t.category_name || '—'} />
-                    <InfoRow icon="sell" label="Tag" value={t.tags?.map((tg: any) => typeof tg === 'string' ? tg : tg.tag).join(', ') || '—'} />
-                    <InfoRow icon="attach-money" label="Valuta" value={`${t.currency_name || ''} (${t.currency_code || ''})`} />
-                    {t.foreign_amount && (
-                        <InfoRow icon="currency-exchange" label="Importo estero" value={`${t.foreign_currency_symbol || ''} ${t.foreign_amount}`} />
+                    <Text style={{ color: c.text, fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 4 }}>
+                        {a.title || 'Ricorrenza'}
+                    </Text>
+                    {t?.description && t.description !== a.title && (
+                        <Text style={{ color: c.textSecondary, fontSize: 14 }}>
+                            {t.description}
+                        </Text>
                     )}
-                    <InfoRow icon="fingerprint" label="ID Transazione" value={`#${tx.id}`} />
+
+                    {!a.active && (
+                        <View style={{ backgroundColor: c.warning + '22', marginTop: 12, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 }}>
+                            <Text style={{ color: c.warning, fontSize: 12, fontWeight: '700' }}>INATTIVA</Text>
+                        </View>
+                    )}
                 </View>
 
-                {/* Notes */}
-                <View style={{ backgroundColor: c.bgCard, marginTop: 12, marginHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: c.border, padding: 16 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                        <MaterialIcons name="notes" size={18} color={c.primary} />
-                        <Text style={{ color: c.textSecondary, fontSize: 11, fontWeight: '600' }}>NOTE</Text>
-                    </View>
-                    <Text style={{ color: t.notes ? c.text : c.textMuted, fontSize: 14, lineHeight: 20, fontStyle: t.notes ? 'normal' : 'italic' }}>
-                        {t.notes || 'Nessuna nota'}
-                    </Text>
+                {/* Info List */}
+                <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
+                    <InfoRow icon="repeat" label="Frequenza" value={getFreqLabel(a.repeat_freq || a.repetitions?.[0]?.type || '')} />
+                    <InfoRow icon="account-balance-wallet" label={isDeposit ? 'Destinazione' : 'Sorgente'} value={t?.source_name || '—'} />
+                    <InfoRow icon="shopping-cart" label={isDeposit ? 'Provenienza' : isExpense ? 'Destinatario' : 'Destinazione'} value={t?.destination_name || '—'} />
+                    {t?.category_name && <InfoRow icon="category" label="Categoria" value={t.category_name} />}
+                    {a.created_at && <InfoRow icon="event" label="Creata in data" value={formatDate(a.created_at)} />}
+                    {a.first_date && <InfoRow icon="event-available" label="Iniziata il" value={formatDate(a.first_date)} />}
+                    {a.next_expected_match && <InfoRow icon="update" label="Prossima occorrenza stimata" value={formatDate(a.next_expected_match)} />}
                 </View>
 
-                {/* Metadata */}
-                <View style={{ backgroundColor: c.bgCard, marginTop: 12, marginHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: c.border, padding: 16 }}>
-                    <Text style={{ color: c.textSecondary, fontSize: 11, fontWeight: '600', marginBottom: 10 }}>INFORMAZIONI</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                        <Text style={{ color: c.textSecondary, fontSize: 12 }}>Creata</Text>
-                        <Text style={{ color: c.text, fontSize: 12, fontWeight: '500' }}>{tx.attributes.created_at ? formatDate(tx.attributes.created_at) : '—'}</Text>
+                {a.notes && (
+                    <View style={{ marginHorizontal: 16, marginTop: 16, padding: 16, backgroundColor: c.bgCard, borderRadius: 14, borderWidth: 1, borderColor: c.border }}>
+                        <Text style={{ color: c.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8 }}>NOTE</Text>
+                        <Text style={{ color: c.text, fontSize: 14, lineHeight: 20 }}>{a.notes}</Text>
                     </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                        <Text style={{ color: c.textSecondary, fontSize: 12 }}>Aggiornata</Text>
-                        <Text style={{ color: c.text, fontSize: 12, fontWeight: '500' }}>{tx.attributes.updated_at ? formatDate(tx.attributes.updated_at) : '—'}</Text>
-                    </View>
-                </View>
+                )}
+
+                {/* Delete Button */}
+                <TouchableOpacity onPress={handleDelete} disabled={deleting} style={{ marginHorizontal: 16, marginTop: 24, padding: 16, backgroundColor: c.danger + '1A', borderRadius: 14, borderWidth: 1, borderColor: c.danger + '33', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    {deleting ? <ActivityIndicator size="small" color={c.danger} /> : <><MaterialIcons name="delete-outline" size={20} color={c.danger} /><Text style={{ color: c.danger, fontSize: 15, fontWeight: '700' }}>Elimina Ricorrenza</Text></>}
+                </TouchableOpacity>
             </ScrollView>
-
-            {/* Bottom Actions */}
-            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: c.bg + 'F2', borderTopWidth: 1, borderTopColor: c.border, padding: 16, paddingBottom: 32, flexDirection: 'row', gap: 12 }}>
-                <TouchableOpacity style={{ flex: 1, height: 50, borderRadius: 14, backgroundColor: c.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }} onPress={() => setEditing(true)}>
-                    <MaterialIcons name="edit" size={18} color="white" />
-                    <Text style={{ color: 'white', fontWeight: '700', fontSize: 14 }}>Modifica</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={{ height: 50, width: 50, borderRadius: 14, backgroundColor: c.danger + '14', borderWidth: 1, borderColor: c.danger + '33', alignItems: 'center', justifyContent: 'center' }} onPress={handleDelete} disabled={deleting}>
-                    {deleting ? <ActivityIndicator size="small" color={c.danger} /> : <MaterialIcons name="delete" size={22} color={c.danger} />}
-                </TouchableOpacity>
-            </View>
         </SafeAreaView>
     );
 }

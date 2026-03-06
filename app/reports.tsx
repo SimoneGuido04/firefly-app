@@ -1,12 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { summaryApi, categoriesApi } from '../lib/api';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { categoriesApi, summaryApi } from '../lib/api';
 import { formatCurrency } from '../lib/helpers';
-import { useThemeStore } from '../store/themeStore';
 import { useRefreshStore } from '../store/refreshStore';
+import { useThemeStore } from '../store/themeStore';
 
 type Period = '1M' | '3M' | '6M' | '1Y';
 const CATEGORY_COLORS = ['#f59e0b', '#3b82f6', '#a855f7', '#10b981', '#ef4444', '#ec4899', '#06b6d4', '#f97316'];
@@ -47,33 +47,57 @@ export default function ReportsScreen() {
                 for (const key of Object.keys(d)) { if (key.startsWith('earned-in-')) earned += parseFloat(d[key]?.monetary_value || '0'); if (key.startsWith('spent-in-')) spent += Math.abs(parseFloat(d[key]?.monetary_value || '0')); }
                 setTotalEarned(earned); setTotalSpent(spent); setNetBalance(earned - spent);
             }
+
+            // Parallel: fetch category spending
             const catRes = await categoriesApi.list().catch(() => null);
             if (catRes?.data?.data) {
+                const topCats = catRes.data.data.slice(0, 8);
+                const catResults = await Promise.all(
+                    topCats.map((cat: any) =>
+                        categoriesApi.transactions(cat.id, 1, start, end).catch(() => ({ data: { data: [] } }))
+                    )
+                );
                 const catSpending: any[] = [];
-                for (const cat of catRes.data.data.slice(0, 8)) {
-                    try {
-                        const txRes = await categoriesApi.transactions(cat.id, 1, start, end);
-                        if (txRes.data?.data) {
-                            const total = txRes.data.data.reduce((sum: number, tx: any) => { const t = tx.attributes.transactions[0]; if (t.type === 'withdrawal') return sum + Math.abs(parseFloat(t.amount || '0')); return sum; }, 0);
-                            if (total > 0) catSpending.push({ name: cat.attributes.name, amount: total, count: txRes.data.data.length });
-                        }
-                    } catch { }
-                }
-                catSpending.sort((a, b) => b.amount - a.amount); setCategorySpending(catSpending);
+                topCats.forEach((cat: any, i: number) => {
+                    const data = catResults[i]?.data?.data || [];
+                    const total = data.reduce((sum: number, tx: any) => {
+                        const t = tx.attributes.transactions[0];
+                        if (t.type === 'withdrawal') return sum + Math.abs(parseFloat(t.amount || '0'));
+                        return sum;
+                    }, 0);
+                    if (total > 0) catSpending.push({ name: cat.attributes.name, amount: total, count: data.length });
+                });
+                catSpending.sort((a, b) => b.amount - a.amount);
+                setCategorySpending(catSpending);
             }
+
+            // Parallel: fetch monthly summaries
             const months = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
             const monthCount = period === '1M' ? 1 : period === '3M' ? 3 : period === '6M' ? 6 : 12;
-            const now = new Date(); const mData: any[] = [];
-            for (let i = monthCount - 1; i >= 0; i--) {
+            const now = new Date();
+            const monthParams = Array.from({ length: monthCount }, (_, idx) => {
+                const i = monthCount - 1 - idx;
                 const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
                 const mStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
                 const mEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
-                try {
-                    const mRes = await summaryApi.basic(mStart, mEnd); let mE = 0, mS = 0;
-                    if (mRes?.data) { for (const key of Object.keys(mRes.data)) { if (key.startsWith('earned-in-')) mE += parseFloat(mRes.data[key]?.monetary_value || '0'); if (key.startsWith('spent-in-')) mS += Math.abs(parseFloat(mRes.data[key]?.monetary_value || '0')); } }
-                    mData.push({ month: months[d.getMonth()], earned: mE, spent: mS });
-                } catch { mData.push({ month: months[d.getMonth()], earned: 0, spent: 0 }); }
-            }
+                return { month: months[d.getMonth()], mStart, mEnd };
+            });
+            const monthResults = await Promise.all(
+                monthParams.map(({ mStart, mEnd }) =>
+                    summaryApi.basic(mStart, mEnd).catch(() => ({ data: {} }))
+                )
+            );
+            const mData = monthParams.map((mp, i) => {
+                const mRes = monthResults[i];
+                let mE = 0, mS = 0;
+                if (mRes?.data) {
+                    for (const key of Object.keys(mRes.data)) {
+                        if (key.startsWith('earned-in-')) mE += parseFloat(mRes.data[key]?.monetary_value || '0');
+                        if (key.startsWith('spent-in-')) mS += Math.abs(parseFloat(mRes.data[key]?.monetary_value || '0'));
+                    }
+                }
+                return { month: mp.month, earned: mE, spent: mS };
+            });
             setMonthlyData(mData);
         } catch (e) { console.error(e); }
         finally { setLoading(false); }

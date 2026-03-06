@@ -1,12 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Switch, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { aboutApi, billsApi, piggyBanksApi, recurringApi } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
-import { aboutApi, piggyBanksApi, billsApi, recurringApi } from '../../lib/api';
-import * as LocalAuthentication from 'expo-local-authentication';
 
 export default function ProfileScreen() {
     const router = useRouter();
@@ -43,7 +43,12 @@ export default function ProfileScreen() {
         })();
     }, []);
 
-    const handleLogout = async () => { await logout(); router.replace('/setup'); };
+    const handleLogout = () => {
+        Alert.alert('Esci', 'Sei sicuro di voler uscire? Dovrai reinserire le credenziali.', [
+            { text: 'Annulla', style: 'cancel' },
+            { text: 'Esci', style: 'destructive', onPress: async () => { await logout(); router.replace('/setup'); } },
+        ]);
+    };
     const host = url ? url.replace('https://', '').replace('http://', '') : 'Non configurato';
 
     const MENU_ITEMS = [

@@ -1,12 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { billsApi } from '../lib/api';
-import { formatCurrency, formatDate } from '../lib/helpers';
-import { useThemeStore } from '../store/themeStore';
+import { firstOfMonthStr, formatCurrency, formatDate, lastOfMonthStr } from '../lib/helpers';
 import { useRefreshStore } from '../store/refreshStore';
+import { useThemeStore } from '../store/themeStore';
 
 export default function BillsScreen() {
     const router = useRouter();
@@ -20,7 +20,7 @@ export default function BillsScreen() {
 
     const load = useCallback(async () => {
         try {
-            const res = await billsApi.list();
+            const res = await billsApi.list(1, firstOfMonthStr(), lastOfMonthStr());
             if (res.data?.data) {
                 const items = res.data.data; setBills(items);
                 let paid = 0, pending = 0;
@@ -92,7 +92,15 @@ export default function BillsScreen() {
                                         <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: c.warning + '1A', alignItems: 'center', justifyContent: 'center' }}><MaterialIcons name={getIcon(a.name) as any} size={24} color={c.warning} /></View>
                                         <View style={{ flex: 1 }}>
                                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ color: c.text, fontSize: 15, fontWeight: '700', flex: 1, marginRight: 8 }} numberOfLines={1}>{a.name}</Text><Text style={{ color: c.text, fontSize: 15, fontWeight: '800' }}>{formatCurrency(avg)}</Text></View>
-                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}><Text style={{ color: c.textSecondary, fontSize: 12 }}>Scade: {a.next_expected_match ? formatDate(a.next_expected_match) : 'N/D'}</Text><Text style={{ color: c.warning, fontSize: 9, fontWeight: '800', letterSpacing: 1 }}>DA PAGARE</Text></View>
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                                                <Text style={{ color: c.textSecondary, fontSize: 12 }}>Scade: {a.next_expected_match ? formatDate(a.next_expected_match) : 'N/D'}</Text>
+                                                <TouchableOpacity
+                                                    onPress={() => router.push(`/new-transaction?billId=${bill.id}&billName=${encodeURIComponent(a.name)}&amount=${avg}` as any)}
+                                                    style={{ backgroundColor: c.success + '22', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                    <MaterialIcons name="done" size={14} color={c.success} />
+                                                    <Text style={{ color: c.success, fontSize: 11, fontWeight: '800' }}>PAGA</Text>
+                                                </TouchableOpacity>
+                                            </View>
                                         </View>
                                     </View>
                                 );

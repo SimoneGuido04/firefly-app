@@ -1,12 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { recurringApi } from '../lib/api';
 import { formatCurrency } from '../lib/helpers';
-import { useThemeStore } from '../store/themeStore';
 import { useRefreshStore } from '../store/refreshStore';
+import { useThemeStore } from '../store/themeStore';
 
 type Tab = 'active' | 'inactive' | 'all';
 
@@ -29,10 +29,23 @@ export default function RecurringScreen() {
 
     const filtered = recurrences.filter(r => tab === 'active' ? r.attributes.active : tab === 'inactive' ? !r.attributes.active : true);
     const totalMonth = filtered.reduce((sum, r) => {
-        const tx = r.attributes.transactions?.[0]; if (!tx) return sum;
-        const amt = parseFloat(tx.amount || '0'); const freq = r.attributes.repeat_freq;
-        if (freq === 'monthly') return sum + amt; if (freq === 'weekly') return sum + amt * 4;
-        if (freq === 'daily') return sum + amt * 30; if (freq === 'yearly') return sum + amt / 12;
+        const a = r.attributes;
+        const tx = a.transactions?.[0];
+        if (!tx) return sum;
+
+        const type = a.type || tx.type || 'withdrawal';
+        if (type === 'transfer') return sum; // Transfers are cashflow neutral
+
+        const rawAmt = parseFloat(tx.amount || a.amount || '0');
+        const amt = type === 'deposit' ? rawAmt : -rawAmt;
+        const freq = a.repeat_freq;
+
+        if (freq === 'monthly') return sum + amt;
+        if (freq === 'weekly') return sum + amt * (52 / 12);
+        if (freq === 'daily') return sum + amt * (365 / 12);
+        if (freq === 'yearly') return sum + amt / 12;
+        if (freq === 'quarterly') return sum + amt / 3;
+        if (freq === 'half-year') return sum + amt / 6;
         return sum + amt;
     }, 0);
 
@@ -75,13 +88,13 @@ export default function RecurringScreen() {
 
                     <View style={{ paddingHorizontal: 16, gap: 10 }}>
                         {filtered.length === 0 ? <Text style={{ color: c.textMuted, textAlign: 'center', padding: 40 }}>Nessuna ricorrenza</Text> : filtered.map(r => {
-                            const a = r.attributes; const tx = a.transactions?.[0]; const type = tx?.type || 'withdrawal';
-                            const amount = parseFloat(tx?.amount || '0'); const isDeposit = type === 'deposit';
+                            const a = r.attributes; const tx = a.transactions?.[0]; const type = a.type || tx?.type || 'withdrawal';
+                            const amount = parseFloat(tx?.amount || a.amount || '0'); const isDeposit = type === 'deposit';
                             const desc = a.title || tx?.description || 'Ricorrenza'; const accountName = tx?.source_name || tx?.destination_name || '';
                             return (
-                                <View key={r.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.bgCard, borderRadius: 14, borderWidth: 1, borderColor: c.border, padding: 14 }}>
-                                    <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: isDeposit ? c.success + '1A' : c.primaryBg, alignItems: 'center', justifyContent: 'center' }}>
-                                        <MaterialIcons name={isDeposit ? 'payments' : type === 'transfer' ? 'sync-alt' : 'receipt-long'} size={22} color={isDeposit ? c.success : c.primary} />
+                                <TouchableOpacity key={r.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.bgCard, borderRadius: 14, borderWidth: 1, borderColor: c.border, padding: 14 }} onPress={() => router.push(`/recurring/${r.id}` as any)}>
+                                    <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: isDeposit ? c.success + '1A' : type === 'transfer' ? c.textSecondary + '1A' : c.primaryBg, alignItems: 'center', justifyContent: 'center' }}>
+                                        <MaterialIcons name={isDeposit ? 'arrow-downward' : type === 'transfer' ? 'sync-alt' : 'arrow-upward'} size={22} color={isDeposit ? c.success : type === 'transfer' ? c.textSecondary : c.primary} />
                                     </View>
                                     <View style={{ flex: 1 }}>
                                         <Text style={{ color: c.text, fontSize: 14, fontWeight: '700' }} numberOfLines={1}>{desc}</Text>
@@ -94,7 +107,7 @@ export default function RecurringScreen() {
                                         <Text style={{ fontSize: 14, fontWeight: '800', color: isDeposit ? c.success : c.text }}>{isDeposit ? '+' : '-'} {formatCurrency(amount)}</Text>
                                         {a.latest_date && <View style={{ backgroundColor: c.primaryBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}><Text style={{ color: c.primary, fontSize: 10, fontWeight: '600' }}>{a.latest_date.substring(5, 10).replace('-', '/')}</Text></View>}
                                     </View>
-                                </View>
+                                </TouchableOpacity>
                             );
                         })}
                     </View>
