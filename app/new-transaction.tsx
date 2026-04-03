@@ -3,7 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { accountsApi, categoriesApi, transactionsApi } from '../lib/api';
+import { accountsApi, categoriesApi, tagsApi, transactionsApi } from '../lib/api';
 import { todayStr } from '../lib/helpers';
 import { useRefreshStore } from '../store/refreshStore';
 import { useThemeStore } from '../store/themeStore';
@@ -23,7 +23,15 @@ export default function NewTransactionScreen() {
     const [destId, setDestId] = useState('');
     const [categoryName, setCategoryName] = useState('');
     const [date, setDate] = useState(todayStr());
-    const [tags, setTags] = useState('');
+    const [time, setTime] = useState(() => {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    });
+    const [selectedTags, setSelectedTags] = useState<string[]>([]);
+    const [availableTags, setAvailableTags] = useState<any[]>([]);
+    const [showNewTag, setShowNewTag] = useState(false);
+    const [newTagName, setNewTagName] = useState('');
+    const [creatingTag, setCreatingTag] = useState(false);
     const [notes, setNotes] = useState('');
     const [saving, setSaving] = useState(false);
     const [accounts, setAccounts] = useState<any[]>([]);
@@ -41,16 +49,18 @@ export default function NewTransactionScreen() {
     useEffect(() => {
         (async () => {
             try {
-                const [accRes, expRes, revRes, catRes] = await Promise.all([
+                const [accRes, expRes, revRes, catRes, tagRes] = await Promise.all([
                     accountsApi.list('asset'),
                     accountsApi.list('expense'),
                     accountsApi.list('revenue'),
                     categoriesApi.list(),
+                    tagsApi.list(),
                 ]);
                 if (accRes.data?.data) { setAccounts(accRes.data.data); if (accRes.data.data.length > 0) setSourceId(accRes.data.data[0].id); }
                 if (expRes.data?.data) setExpenseAccounts(expRes.data.data);
                 if (revRes.data?.data) setRevenueAccounts(revRes.data.data);
                 if (catRes.data?.data) setCategories(catRes.data.data);
+                if (tagRes.data?.data) setAvailableTags(tagRes.data.data);
             } catch (e) { console.error(e); }
             finally { setLoading(false); }
         })();
@@ -62,7 +72,7 @@ export default function NewTransactionScreen() {
         if (!sourceId) { Alert.alert('Errore', 'Seleziona un conto'); return; }
         setSaving(true);
         try {
-            const txData: any = { type, description, amount: amount.replace(',', '.'), date, source_id: sourceId, tags: tags ? tags.split(',').map(t => t.trim()) : [], notes: notes || undefined };
+            const txData: any = { type, description, amount: amount.replace(',', '.'), date: `${date}T${time}:00+00:00`, source_id: sourceId, tags: selectedTags, notes: notes || undefined };
             if (billIdParam) txData.bill_id = billIdParam;
             if (billNameParam) txData.bill_name = billNameParam;
 
@@ -237,18 +247,71 @@ export default function NewTransactionScreen() {
                             </View>
                         )}
 
-                        {[
-                            { label: 'Data', icon: 'calendar-today', value: date, set: setDate, placeholder: 'YYYY-MM-DD' },
-                            { label: 'Tag', icon: 'sell', value: tags, set: setTags, placeholder: 'Separati da virgola' },
-                        ].map(f => (
-                            <View key={f.label} style={{ gap: 8 }}>
-                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{f.label}</Text>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
-                                    <MaterialIcons name={f.icon as any} size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder={f.placeholder} placeholderTextColor={c.textMuted} value={f.value} onChangeText={f.set} />
+                        <View style={{ gap: 8 }}>
+                            <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Data e ora</Text>
+                            <View style={{ flexDirection: 'row', gap: 10 }}>
+                                <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                    <MaterialIcons name="calendar-today" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="YYYY-MM-DD" placeholderTextColor={c.textMuted} value={date} onChangeText={setDate} />
+                                </View>
+                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                    <MaterialIcons name="access-time" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="HH:MM" placeholderTextColor={c.textMuted} value={time} onChangeText={setTime} keyboardType="numbers-and-punctuation" />
                                 </View>
                             </View>
-                        ))}
+                        </View>
+
+                        <View style={{ gap: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Tag</Text>
+                                <TouchableOpacity onPress={() => { setShowNewTag(!showNewTag); setNewTagName(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <MaterialIcons name={showNewTag ? 'close' : 'add'} size={16} color={c.primary} />
+                                    <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>{showNewTag ? 'Annulla' : 'Nuovo'}</Text>
+                                </TouchableOpacity>
+                            </View>
+                            {showNewTag && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary, height: 44 }}>
+                                        <MaterialIcons name="sell" size={16} color={c.textSecondary} style={{ marginLeft: 12 }} />
+                                        <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="Nome tag..." placeholderTextColor={c.textMuted} value={newTagName} onChangeText={setNewTagName} autoFocus />
+                                    </View>
+                                    <TouchableOpacity
+                                        disabled={creatingTag || !newTagName.trim()}
+                                        onPress={async () => {
+                                            if (!newTagName.trim()) return;
+                                            setCreatingTag(true);
+                                            try {
+                                                const res = await tagsApi.create({ tag: newTagName.trim() });
+                                                const created = res.data?.data;
+                                                if (created) {
+                                                    setAvailableTags(prev => [...prev, created]);
+                                                    setSelectedTags(prev => [...prev, created.attributes.tag]);
+                                                }
+                                                setShowNewTag(false); setNewTagName('');
+                                            } catch (e) { Alert.alert('Errore', 'Impossibile creare il tag'); }
+                                            finally { setCreatingTag(false); }
+                                        }}
+                                        style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: !newTagName.trim() ? 0.5 : 1 }}
+                                    >
+                                        {creatingTag ? <ActivityIndicator size="small" color="white" /> : <MaterialIcons name="check" size={20} color="white" />}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                {availableTags.map(tag => {
+                                    const tagName: string = tag.attributes.tag;
+                                    const selected = selectedTags.includes(tagName);
+                                    return (
+                                        <TouchableOpacity key={tag.id}
+                                            style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: selected ? c.primary : c.border, backgroundColor: selected ? c.primary : c.bgCard }}
+                                            onPress={() => setSelectedTags(prev => selected ? prev.filter(t => t !== tagName) : [...prev, tagName])}
+                                        >
+                                            <Text style={{ color: selected ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>#{tagName}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
 
                         <View style={{ gap: 8 }}>
                             <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Note</Text>
