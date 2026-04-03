@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { aboutApi, billsApi, categoriesApi, piggyBanksApi, recurringApi } from '../../lib/api';
+import { aboutApi, billsApi, categoriesApi, piggyBanksApi, recurringApi, tagsApi } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
 
@@ -20,6 +20,7 @@ export default function ProfileScreen() {
     const [billCount, setBillCount] = useState(0);
     const [recurringCount, setRecurringCount] = useState(0);
     const [categoryCount, setCategoryCount] = useState(0);
+    const [tagCount, setTagCount] = useState(0);
 
     useEffect(() => {
         (async () => {
@@ -27,10 +28,11 @@ export default function ProfileScreen() {
                 const hasHw = await LocalAuthentication.hasHardwareAsync();
                 const enrolled = await LocalAuthentication.isEnrolledAsync();
                 setBiometricAvailable(hasHw && enrolled);
-                const [aboutRes, userRes, piggyRes, billRes, recRes, catRes] = await Promise.all([
+                const [aboutRes, userRes, piggyRes, billRes, recRes, catRes, tagRes] = await Promise.all([
                     aboutApi.get().catch(() => null), aboutApi.user().catch(() => null),
                     piggyBanksApi.list().catch(() => null), billsApi.list().catch(() => null),
                     recurringApi.list().catch(() => null), categoriesApi.list().catch(() => null),
+                    tagsApi.list().catch(() => null),
                 ]);
                 if (aboutRes?.data?.data) setServerVersion(aboutRes.data.data.version || '');
                 if (userRes?.data?.data) {
@@ -41,6 +43,7 @@ export default function ProfileScreen() {
                 if (billRes?.data?.data) setBillCount(billRes.data.data.length);
                 if (recRes?.data?.data) setRecurringCount(recRes.data.data.length);
                 if (catRes?.data?.data) setCategoryCount(catRes.data.data.length);
+                if (tagRes?.data?.data) setTagCount(tagRes.data.data.length);
             } catch (e) { console.error(e); }
         })();
     }, []);
@@ -108,6 +111,8 @@ export default function ProfileScreen() {
                     <View style={{ backgroundColor: c.bgCard, borderRadius: 14, borderWidth: 1, borderColor: c.border, overflow: 'hidden' }}>
                         <MenuRow icon="category" label="Categorie" onPress={() => router.push('/categories' as any)}
                             right={<View style={{ backgroundColor: c.bgSecondary, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginRight: 4 }}><Text style={{ color: c.textSecondary, fontSize: 11, fontWeight: '700' }}>{categoryCount}</Text></View>} />
+                        <MenuRow icon="sell" label="Tag" border onPress={() => router.push('/tags' as any)}
+                            right={<View style={{ backgroundColor: c.bgSecondary, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginRight: 4 }}><Text style={{ color: c.textSecondary, fontSize: 11, fontWeight: '700' }}>{tagCount}</Text></View>} />
                     </View>
                 </View>
 

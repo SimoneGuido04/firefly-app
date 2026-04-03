@@ -127,6 +127,10 @@ export const chartsApi = {
 // ─── Tags ────────────────────────────────────────────────
 export const tagsApi = {
     list: (page = 1) => getClient().get('/tags', { params: { page } }),
+    get: (tag: string) => getClient().get(`/tags/${encodeURIComponent(tag)}`),
+    create: (data: { tag: string; description?: string }) => getClient().post('/tags', data),
+    update: (tag: string, data: { tag: string; description?: string }) => getClient().put(`/tags/${encodeURIComponent(tag)}`, data),
+    delete: (tag: string) => getClient().delete(`/tags/${encodeURIComponent(tag)}`),
 };
 
 // ─── Preferences ─────────────────────────────────────────

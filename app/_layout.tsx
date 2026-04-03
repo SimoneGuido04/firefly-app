@@ -105,6 +105,7 @@ export default function RootLayout() {
         <Stack.Screen name="new-bill" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="new-recurring" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="categories" options={{ headerShown: false }} />
+        <Stack.Screen name="tags" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
     </>
