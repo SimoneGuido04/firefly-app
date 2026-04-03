@@ -27,17 +27,29 @@ export default function NewTransactionScreen() {
     const [notes, setNotes] = useState('');
     const [saving, setSaving] = useState(false);
     const [accounts, setAccounts] = useState<any[]>([]);
+    const [expenseAccounts, setExpenseAccounts] = useState<any[]>([]);
+    const [revenueAccounts, setRevenueAccounts] = useState<any[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [showNewCategory, setShowNewCategory] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     const [creatingCategory, setCreatingCategory] = useState(false);
+    const [showNewDest, setShowNewDest] = useState(false);
+    const [newDestInputName, setNewDestInputName] = useState('');
+    const [creatingDest, setCreatingDest] = useState(false);
 
     useEffect(() => {
         (async () => {
             try {
-                const [accRes, catRes] = await Promise.all([accountsApi.list('asset'), categoriesApi.list()]);
+                const [accRes, expRes, revRes, catRes] = await Promise.all([
+                    accountsApi.list('asset'),
+                    accountsApi.list('expense'),
+                    accountsApi.list('revenue'),
+                    categoriesApi.list(),
+                ]);
                 if (accRes.data?.data) { setAccounts(accRes.data.data); if (accRes.data.data.length > 0) setSourceId(accRes.data.data[0].id); }
+                if (expRes.data?.data) setExpenseAccounts(expRes.data.data);
+                if (revRes.data?.data) setRevenueAccounts(revRes.data.data);
                 if (catRes.data?.data) setCategories(catRes.data.data);
             } catch (e) { console.error(e); }
             finally { setLoading(false); }
@@ -124,11 +136,58 @@ export default function NewTransactionScreen() {
                         </View>
 
                         <View style={{ gap: 8 }}>
-                            <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{type === 'deposit' ? 'Provenienza' : type === 'transfer' ? 'Conto destinazione' : 'Destinazione spesa'}</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
-                                <MaterialIcons name="shopping-cart" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Es. Supermercato" placeholderTextColor={c.textMuted} value={destName} onChangeText={setDestName} />
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{type === 'deposit' ? 'Provenienza' : type === 'transfer' ? 'Conto destinazione' : 'Destinazione spesa'}</Text>
+                                {type !== 'transfer' && (
+                                    <TouchableOpacity onPress={() => { setShowNewDest(!showNewDest); setNewDestInputName(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                        <MaterialIcons name={showNewDest ? 'close' : 'add'} size={16} color={c.primary} />
+                                        <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>{showNewDest ? 'Annulla' : 'Nuovo'}</Text>
+                                    </TouchableOpacity>
+                                )}
                             </View>
+                            {type !== 'transfer' && showNewDest && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary, height: 44 }}>
+                                        <MaterialIcons name="store" size={16} color={c.textSecondary} style={{ marginLeft: 12 }} />
+                                        <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="Nome conto..." placeholderTextColor={c.textMuted} value={newDestInputName} onChangeText={setNewDestInputName} autoFocus />
+                                    </View>
+                                    <TouchableOpacity
+                                        disabled={creatingDest || !newDestInputName.trim()}
+                                        onPress={async () => {
+                                            if (!newDestInputName.trim()) return;
+                                            setCreatingDest(true);
+                                            try {
+                                                const accType = type === 'deposit' ? 'revenue' : 'expense';
+                                                const res = await accountsApi.create({ name: newDestInputName.trim(), type: accType });
+                                                const created = res.data?.data;
+                                                if (created) {
+                                                    if (type === 'deposit') setRevenueAccounts(prev => [...prev, created]);
+                                                    else setExpenseAccounts(prev => [...prev, created]);
+                                                    setDestName(created.attributes.name);
+                                                }
+                                                setShowNewDest(false); setNewDestInputName('');
+                                            } catch (e) { Alert.alert('Errore', 'Impossibile creare il conto'); }
+                                            finally { setCreatingDest(false); }
+                                        }}
+                                        style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: !newDestInputName.trim() ? 0.5 : 1 }}
+                                    >
+                                        {creatingDest ? <ActivityIndicator size="small" color="white" /> : <MaterialIcons name="check" size={20} color="white" />}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                {(type === 'transfer' ? accounts : type === 'deposit' ? revenueAccounts : expenseAccounts).map(acc => {
+                                    const selected = type === 'transfer' ? destId === acc.id : destName === acc.attributes.name;
+                                    return (
+                                        <TouchableOpacity key={acc.id}
+                                            style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: selected ? c.primary : c.border, backgroundColor: selected ? c.primary : c.bgCard }}
+                                            onPress={() => { if (type === 'transfer') { setDestId(acc.id); setDestName(acc.attributes.name); } else setDestName(acc.attributes.name); }}
+                                        >
+                                            <Text style={{ color: selected ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>{acc.attributes.name}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
                         </View>
 
                         {type !== 'transfer' && (

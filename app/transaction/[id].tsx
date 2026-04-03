@@ -35,20 +35,29 @@ export default function TransactionDetailScreen() {
 
     // Lists for pickers
     const [accounts, setAccounts] = useState<any[]>([]);
+    const [expenseAccounts, setExpenseAccounts] = useState<any[]>([]);
+    const [revenueAccounts, setRevenueAccounts] = useState<any[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
     const [showNewCategory, setShowNewCategory] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     const [creatingCategory, setCreatingCategory] = useState(false);
+    const [showNewDest, setShowNewDest] = useState(false);
+    const [newDestInputName, setNewDestInputName] = useState('');
+    const [creatingDest, setCreatingDest] = useState(false);
 
     const load = useCallback(async () => {
         if (!id) return;
         try {
-            const [txRes, accRes, catRes] = await Promise.all([
+            const [txRes, accRes, expRes, revRes, catRes] = await Promise.all([
                 transactionsApi.get(id),
                 accountsApi.list('asset'),
+                accountsApi.list('expense'),
+                accountsApi.list('revenue'),
                 categoriesApi.list(),
             ]);
             if (accRes.data?.data) setAccounts(accRes.data.data);
+            if (expRes.data?.data) setExpenseAccounts(expRes.data.data);
+            if (revRes.data?.data) setRevenueAccounts(revRes.data.data);
             if (catRes.data?.data) setCategories(catRes.data.data);
             if (txRes.data?.data) {
                 const data = txRes.data.data;
@@ -221,11 +230,58 @@ export default function TransactionDetailScreen() {
 
                             {/* Destination */}
                             <View style={{ gap: 8 }}>
-                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{editType === 'deposit' ? 'Provenienza' : editType === 'transfer' ? 'Conto destinazione' : 'Destinazione spesa'}</Text>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
-                                    <MaterialIcons name="shopping-cart" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Es. Supermercato" placeholderTextColor={c.textMuted} value={editDestName} onChangeText={setEditDestName} />
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{editType === 'deposit' ? 'Provenienza' : editType === 'transfer' ? 'Conto destinazione' : 'Destinazione spesa'}</Text>
+                                    {editType !== 'transfer' && (
+                                        <TouchableOpacity onPress={() => { setShowNewDest(!showNewDest); setNewDestInputName(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                            <MaterialIcons name={showNewDest ? 'close' : 'add'} size={16} color={c.primary} />
+                                            <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>{showNewDest ? 'Annulla' : 'Nuovo'}</Text>
+                                        </TouchableOpacity>
+                                    )}
                                 </View>
+                                {editType !== 'transfer' && showNewDest && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary, height: 44 }}>
+                                            <MaterialIcons name="store" size={16} color={c.textSecondary} style={{ marginLeft: 12 }} />
+                                            <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="Nome conto..." placeholderTextColor={c.textMuted} value={newDestInputName} onChangeText={setNewDestInputName} autoFocus />
+                                        </View>
+                                        <TouchableOpacity
+                                            disabled={creatingDest || !newDestInputName.trim()}
+                                            onPress={async () => {
+                                                if (!newDestInputName.trim()) return;
+                                                setCreatingDest(true);
+                                                try {
+                                                    const accType = editType === 'deposit' ? 'revenue' : 'expense';
+                                                    const res = await accountsApi.create({ name: newDestInputName.trim(), type: accType });
+                                                    const created = res.data?.data;
+                                                    if (created) {
+                                                        if (editType === 'deposit') setRevenueAccounts(prev => [...prev, created]);
+                                                        else setExpenseAccounts(prev => [...prev, created]);
+                                                        setEditDestName(created.attributes.name);
+                                                    }
+                                                    setShowNewDest(false); setNewDestInputName('');
+                                                } catch (e) { Alert.alert('Errore', 'Impossibile creare il conto'); }
+                                                finally { setCreatingDest(false); }
+                                            }}
+                                            style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: !newDestInputName.trim() ? 0.5 : 1 }}
+                                        >
+                                            {creatingDest ? <ActivityIndicator size="small" color="white" /> : <MaterialIcons name="check" size={20} color="white" />}
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                    {(editType === 'transfer' ? accounts : editType === 'deposit' ? revenueAccounts : expenseAccounts).map(acc => {
+                                        const selected = editType === 'transfer' ? editDestId === acc.id.toString() : editDestName === acc.attributes.name;
+                                        return (
+                                            <TouchableOpacity key={acc.id}
+                                                style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: selected ? c.primary : c.border, backgroundColor: selected ? c.primary : c.bgCard }}
+                                                onPress={() => { if (editType === 'transfer') { setEditDestId(acc.id.toString()); setEditDestName(acc.attributes.name); } else setEditDestName(acc.attributes.name); }}
+                                            >
+                                                <Text style={{ color: selected ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>{acc.attributes.name}</Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
                             </View>
 
                             {/* Category */}
