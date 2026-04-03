@@ -71,9 +71,8 @@ export default function TransactionsScreen() {
 
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: c.bgCard, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.border }}>
+            <View style={{ backgroundColor: c.bgCard, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.border }}>
                 <Text style={{ color: c.text, fontSize: 20, fontWeight: '800' }}>Transazioni</Text>
-                <MaterialIcons name="notifications-none" size={22} color={c.textSecondary} />
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 12, backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 44 }}>
@@ -81,7 +80,7 @@ export default function TransactionsScreen() {
                 <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Cerca transazioni..." placeholderTextColor={c.textMuted} value={search} onChangeText={setSearch} />
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12, maxHeight: 48, flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, alignItems: 'center' }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12, height: 56, flexShrink: 0 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, alignItems: 'center' }}>
                 {FILTERS.map(f => (
                     <TouchableOpacity key={f.key} style={{ height: 36, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 18, backgroundColor: filter === f.key ? c.primary : c.bgCard, borderWidth: 1, borderColor: filter === f.key ? c.primary : c.border }} onPress={() => setFilter(f.key)}>
                         <Text style={{ color: filter === f.key ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>{f.label}</Text>
@@ -130,9 +129,6 @@ export default function TransactionsScreen() {
                 </ScrollView>
             )}
 
-            <TouchableOpacity style={{ position: 'absolute', bottom: 90, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', elevation: 8 }} onPress={() => router.push('/new-transaction')}>
-                <MaterialIcons name="add" size={28} color="white" />
-            </TouchableOpacity>
         </SafeAreaView>
     );
 }
