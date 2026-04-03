@@ -80,10 +80,6 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={['top']}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.bgCard, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.border }}>
-        <Text style={{ flex: 1, color: c.text, fontSize: 18, fontWeight: '700' }}>Firefly III</Text>
-        <MaterialIcons name="notifications" size={22} color={c.textSecondary} />
-      </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}>

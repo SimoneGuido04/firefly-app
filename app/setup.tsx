@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
@@ -55,6 +55,18 @@ export default function SetupScreen() {
                             <TextInput style={{ flex: 1, color: c.text, fontSize: 15, paddingHorizontal: 12, height: '100%' }} placeholder="https://firefly.example.com" placeholderTextColor={c.textMuted} value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" />
                         </View>
                     </View>
+
+                    <TouchableOpacity
+                        onPress={() => {
+                            const base = url.endsWith('/') ? url.slice(0, -1) : url;
+                            if (!base || base === 'https:/') { Alert.alert('Errore', 'Inserisci prima l\'URL dell\'istanza.'); return; }
+                            Linking.openURL(`${base}/profile`);
+                        }}
+                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: c.primaryBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary + '55', height: 44 }}
+                    >
+                        <MaterialIcons name="open-in-browser" size={18} color={c.primary} />
+                        <Text style={{ color: c.primary, fontSize: 13, fontWeight: '600' }}>Apri profilo per ottenere il token OAuth</Text>
+                    </TouchableOpacity>
 
                     <View style={{ gap: 8 }}>
                         <Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>Personal Access Token</Text>

@@ -36,6 +36,9 @@ export default function TransactionDetailScreen() {
     // Lists for pickers
     const [accounts, setAccounts] = useState<any[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
+    const [showNewCategory, setShowNewCategory] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState('');
+    const [creatingCategory, setCreatingCategory] = useState(false);
 
     const load = useCallback(async () => {
         if (!id) return;
@@ -228,7 +231,38 @@ export default function TransactionDetailScreen() {
                             {/* Category */}
                             {editType !== 'transfer' && (
                                 <View style={{ gap: 8 }}>
-                                    <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Categoria</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Categoria</Text>
+                                        <TouchableOpacity onPress={() => { setShowNewCategory(!showNewCategory); setNewCategoryName(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                            <MaterialIcons name={showNewCategory ? 'close' : 'add'} size={16} color={c.primary} />
+                                            <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>{showNewCategory ? 'Annulla' : 'Nuova'}</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                    {showNewCategory && (
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary, height: 44 }}>
+                                                <MaterialIcons name="category" size={16} color={c.textSecondary} style={{ marginLeft: 12 }} />
+                                                <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="Nome categoria..." placeholderTextColor={c.textMuted} value={newCategoryName} onChangeText={setNewCategoryName} autoFocus />
+                                            </View>
+                                            <TouchableOpacity
+                                                disabled={creatingCategory || !newCategoryName.trim()}
+                                                onPress={async () => {
+                                                    if (!newCategoryName.trim()) return;
+                                                    setCreatingCategory(true);
+                                                    try {
+                                                        const res = await categoriesApi.create({ name: newCategoryName.trim() });
+                                                        const created = res.data?.data;
+                                                        if (created) { setCategories(prev => [...prev, created]); setEditCategory(created.attributes.name); }
+                                                        setShowNewCategory(false); setNewCategoryName('');
+                                                    } catch (e) { Alert.alert('Errore', 'Impossibile creare la categoria'); }
+                                                    finally { setCreatingCategory(false); }
+                                                }}
+                                                style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: !newCategoryName.trim() ? 0.5 : 1 }}
+                                            >
+                                                {creatingCategory ? <ActivityIndicator size="small" color="white" /> : <MaterialIcons name="check" size={20} color="white" />}
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
                                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                                         <TouchableOpacity style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: !editCategory ? c.primary : c.border, backgroundColor: !editCategory ? c.primary : c.bgCard }} onPress={() => setEditCategory('')}>
                                             <Text style={{ color: !editCategory ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>Nessuna</Text>
