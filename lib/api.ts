@@ -78,6 +78,8 @@ export const categoriesApi = {
     list: (page = 1) => getClient().get('/categories', { params: { page } }),
     get: (id: string) => getClient().get(`/categories/${id}`),
     create: (data: { name: string }) => getClient().post('/categories', data),
+    update: (id: string, data: { name: string }) => getClient().put(`/categories/${id}`, data),
+    delete: (id: string) => getClient().delete(`/categories/${id}`),
     transactions: (id: string, page = 1, start?: string, end?: string) =>
         getClient().get(`/categories/${id}/transactions`, { params: { page, start, end } }),
 };

@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { aboutApi, billsApi, piggyBanksApi, recurringApi } from '../../lib/api';
+import { aboutApi, billsApi, categoriesApi, piggyBanksApi, recurringApi } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
 
@@ -19,6 +19,7 @@ export default function ProfileScreen() {
     const [piggyCount, setPiggyCount] = useState(0);
     const [billCount, setBillCount] = useState(0);
     const [recurringCount, setRecurringCount] = useState(0);
+    const [categoryCount, setCategoryCount] = useState(0);
 
     useEffect(() => {
         (async () => {
@@ -26,10 +27,10 @@ export default function ProfileScreen() {
                 const hasHw = await LocalAuthentication.hasHardwareAsync();
                 const enrolled = await LocalAuthentication.isEnrolledAsync();
                 setBiometricAvailable(hasHw && enrolled);
-                const [aboutRes, userRes, piggyRes, billRes, recRes] = await Promise.all([
+                const [aboutRes, userRes, piggyRes, billRes, recRes, catRes] = await Promise.all([
                     aboutApi.get().catch(() => null), aboutApi.user().catch(() => null),
                     piggyBanksApi.list().catch(() => null), billsApi.list().catch(() => null),
-                    recurringApi.list().catch(() => null),
+                    recurringApi.list().catch(() => null), categoriesApi.list().catch(() => null),
                 ]);
                 if (aboutRes?.data?.data) setServerVersion(aboutRes.data.data.version || '');
                 if (userRes?.data?.data) {
@@ -39,6 +40,7 @@ export default function ProfileScreen() {
                 if (piggyRes?.data?.data) setPiggyCount(piggyRes.data.data.length);
                 if (billRes?.data?.data) setBillCount(billRes.data.data.length);
                 if (recRes?.data?.data) setRecurringCount(recRes.data.data.length);
+                if (catRes?.data?.data) setCategoryCount(catRes.data.data.length);
             } catch (e) { console.error(e); }
         })();
     }, []);
@@ -97,6 +99,15 @@ export default function ProfileScreen() {
                             <MenuRow key={item.label} icon={item.icon} label={item.label} border={i > 0} onPress={() => router.push(item.route as any)}
                                 right={item.count !== undefined ? <View style={{ backgroundColor: c.bgSecondary, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginRight: 4 }}><Text style={{ color: c.textSecondary, fontSize: 11, fontWeight: '700' }}>{item.count}</Text></View> : null} />
                         ))}
+                    </View>
+                </View>
+
+                {/* Other */}
+                <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+                    <Text style={{ color: c.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, marginBottom: 8, marginLeft: 4 }}>ALTRO</Text>
+                    <View style={{ backgroundColor: c.bgCard, borderRadius: 14, borderWidth: 1, borderColor: c.border, overflow: 'hidden' }}>
+                        <MenuRow icon="category" label="Categorie" onPress={() => router.push('/categories' as any)}
+                            right={<View style={{ backgroundColor: c.bgSecondary, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginRight: 4 }}><Text style={{ color: c.textSecondary, fontSize: 11, fontWeight: '700' }}>{categoryCount}</Text></View>} />
                     </View>
                 </View>
 
