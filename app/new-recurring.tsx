@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { accountsApi, categoriesApi, recurringApi } from '../lib/api';
+import { accountsApi, categoriesApi, recurringApi, tagsApi } from '../lib/api';
 import { todayStr } from '../lib/helpers';
 import { useRefreshStore } from '../store/refreshStore';
 import { useThemeStore } from '../store/themeStore';
@@ -27,27 +27,74 @@ export default function NewRecurringScreen() {
     const [description, setDescription] = useState('');
     const [amount, setAmount] = useState('');
     const [firstDate, setFirstDate] = useState(todayStr());
+    const [firstTime, setFirstTime] = useState(() => {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    });
+    const [endDate, setEndDate] = useState('');
+    const [endTime, setEndTime] = useState('00:00');
+    const [nrOfRepetitions, setNrOfRepetitions] = useState('0');
     const [repeatFreq, setRepeatFreq] = useState('monthly');
     const [sourceId, setSourceId] = useState('');
     const [destName, setDestName] = useState('');
+    const [destId, setDestId] = useState('');
     const [categoryName, setCategoryName] = useState('');
     const [notes, setNotes] = useState('');
-    const [endDate, setEndDate] = useState('');
+    const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+    // Account lists
     const [accounts, setAccounts] = useState<any[]>([]);
+    const [expenseAccounts, setExpenseAccounts] = useState<any[]>([]);
+    const [revenueAccounts, setRevenueAccounts] = useState<any[]>([]);
+
+    // Category
     const [categories, setCategories] = useState<any[]>([]);
+    const [showNewCategory, setShowNewCategory] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState('');
+    const [creatingCategory, setCreatingCategory] = useState(false);
+
+    // Destination create
+    const [showNewDest, setShowNewDest] = useState(false);
+    const [newDestInputName, setNewDestInputName] = useState('');
+    const [creatingDest, setCreatingDest] = useState(false);
+
+    // Tags
+    const [availableTags, setAvailableTags] = useState<any[]>([]);
+    const [showNewTag, setShowNewTag] = useState(false);
+    const [newTagName, setNewTagName] = useState('');
+    const [creatingTag, setCreatingTag] = useState(false);
+
     const [saving, setSaving] = useState(false);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         (async () => {
             try {
-                const [accRes, catRes] = await Promise.all([accountsApi.list('asset'), categoriesApi.list()]);
+                const [accRes, expRes, revRes, catRes, tagRes] = await Promise.all([
+                    accountsApi.list('asset'),
+                    accountsApi.list('expense'),
+                    accountsApi.list('revenue'),
+                    categoriesApi.list(),
+                    tagsApi.list(),
+                ]);
                 if (accRes.data?.data) { setAccounts(accRes.data.data); if (accRes.data.data.length > 0) setSourceId(accRes.data.data[0].id); }
+                if (expRes.data?.data) setExpenseAccounts(expRes.data.data);
+                if (revRes.data?.data) setRevenueAccounts(revRes.data.data);
                 if (catRes.data?.data) setCategories(catRes.data.data);
+                if (tagRes.data?.data) setAvailableTags(tagRes.data.data);
             } catch (e) { console.error(e); }
             finally { setLoading(false); }
         })();
     }, []);
+
+    const getMoment = (freq: string, dateStr: string): string => {
+        const d = new Date(dateStr);
+        if (freq === 'weekly') return String(d.getDay() === 0 ? 7 : d.getDay());
+        if (freq === 'monthly') return String(d.getDate());
+        if (freq === 'quarterly' || freq === 'half-year') return `1/${d.getDate()}`;
+        if (freq === 'yearly') return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return '1';
+    };
 
     const handleSave = async () => {
         if (!title.trim()) { Alert.alert('Errore', 'Inserisci un titolo'); return; }
@@ -61,6 +108,7 @@ export default function NewRecurringScreen() {
                 amount: amount.replace(',', '.'),
                 source_id: sourceId,
             };
+            if (selectedTags.length > 0) txData.tags = selectedTags;
             if (type === 'withdrawal') {
                 txData.destination_name = destName || 'Unknown';
                 if (categoryName) txData.category_name = categoryName;
@@ -70,20 +118,28 @@ export default function NewRecurringScreen() {
                 txData.destination_id = sourceId;
                 if (categoryName) txData.category_name = categoryName;
             } else {
-                txData.destination_name = destName || 'Unknown';
+                txData.destination_id = destId || undefined;
+                txData.destination_name = destId ? undefined : (destName || 'Unknown');
             }
 
-            await recurringApi.create({
+            const payload: any = {
+                type,
                 title: title.trim(),
-                first_date: firstDate,
+                first_date: `${firstDate}T${firstTime}:00+00:00`,
                 repeat_freq: repeatFreq,
-                end_date: endDate || undefined,
                 notes: notes || undefined,
                 active: true,
                 apply_rules: true,
                 transactions: [txData],
-                repetitions: [{ type: repeatFreq, moment: '' }],
-            });
+                repetitions: [{ type: repeatFreq, moment: getMoment(repeatFreq, firstDate) }],
+            };
+            if (endDate) {
+                payload.repeat_until = `${endDate}T${endTime}:00+00:00`;
+            } else {
+                const nr = parseInt(nrOfRepetitions) || 0;
+                payload.nr_of_repetitions = nr > 0 ? nr : null;
+            }
+            await recurringApi.create(payload);
             triggerRefresh();
             Alert.alert('Successo', 'Ricorrenza creata!', [{ text: 'OK', onPress: () => router.back() }]);
         } catch (e: any) {
@@ -137,6 +193,7 @@ export default function NewRecurringScreen() {
                     </View>
 
                     <View style={{ paddingHorizontal: 16, gap: 16, paddingBottom: 24 }}>
+
                         {/* Title */}
                         <View style={{ gap: 8 }}>
                             <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Titolo</Text>
@@ -151,11 +208,11 @@ export default function NewRecurringScreen() {
                             <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Descrizione transazione</Text>
                             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
                                 <MaterialIcons name="edit" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Descrizione" placeholderTextColor={c.textMuted} value={description} onChangeText={setDescription} />
+                                <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Descrizione (opzionale)" placeholderTextColor={c.textMuted} value={description} onChangeText={setDescription} />
                             </View>
                         </View>
 
-                        {/* Account */}
+                        {/* Source account */}
                         <View style={{ gap: 8 }}>
                             <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{type === 'deposit' ? 'Conto destinazione' : 'Conto di origine'}</Text>
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
@@ -169,17 +226,95 @@ export default function NewRecurringScreen() {
 
                         {/* Destination */}
                         <View style={{ gap: 8 }}>
-                            <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{type === 'deposit' ? 'Provenienza' : 'Destinazione'}</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
-                                <MaterialIcons name="shopping-cart" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="Es. Netflix" placeholderTextColor={c.textMuted} value={destName} onChangeText={setDestName} />
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{type === 'deposit' ? 'Provenienza' : type === 'transfer' ? 'Conto destinazione' : 'Destinazione spesa'}</Text>
+                                {type !== 'transfer' && (
+                                    <TouchableOpacity onPress={() => { setShowNewDest(!showNewDest); setNewDestInputName(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                        <MaterialIcons name={showNewDest ? 'close' : 'add'} size={16} color={c.primary} />
+                                        <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>{showNewDest ? 'Annulla' : 'Nuovo'}</Text>
+                                    </TouchableOpacity>
+                                )}
                             </View>
+                            {type !== 'transfer' && showNewDest && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary, height: 44 }}>
+                                        <MaterialIcons name="store" size={16} color={c.textSecondary} style={{ marginLeft: 12 }} />
+                                        <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="Nome conto..." placeholderTextColor={c.textMuted} value={newDestInputName} onChangeText={setNewDestInputName} autoFocus />
+                                    </View>
+                                    <TouchableOpacity
+                                        disabled={creatingDest || !newDestInputName.trim()}
+                                        onPress={async () => {
+                                            if (!newDestInputName.trim()) return;
+                                            setCreatingDest(true);
+                                            try {
+                                                const accType = type === 'deposit' ? 'revenue' : 'expense';
+                                                const res = await accountsApi.create({ name: newDestInputName.trim(), type: accType });
+                                                const created = res.data?.data;
+                                                if (created) {
+                                                    if (type === 'deposit') setRevenueAccounts(prev => [...prev, created]);
+                                                    else setExpenseAccounts(prev => [...prev, created]);
+                                                    setDestName(created.attributes.name);
+                                                }
+                                                setShowNewDest(false); setNewDestInputName('');
+                                            } catch (e) { Alert.alert('Errore', 'Impossibile creare il conto'); }
+                                            finally { setCreatingDest(false); }
+                                        }}
+                                        style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: !newDestInputName.trim() ? 0.5 : 1 }}
+                                    >
+                                        {creatingDest ? <ActivityIndicator size="small" color="white" /> : <MaterialIcons name="check" size={20} color="white" />}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                {(type === 'transfer' ? accounts : type === 'deposit' ? revenueAccounts : expenseAccounts).map(acc => {
+                                    const selected = type === 'transfer' ? destId === acc.id : destName === acc.attributes.name;
+                                    return (
+                                        <TouchableOpacity key={acc.id}
+                                            style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: selected ? c.primary : c.border, backgroundColor: selected ? c.primary : c.bgCard }}
+                                            onPress={() => { if (type === 'transfer') { setDestId(acc.id); setDestName(acc.attributes.name); } else setDestName(acc.attributes.name); }}
+                                        >
+                                            <Text style={{ color: selected ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>{acc.attributes.name}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
                         </View>
 
                         {/* Category */}
                         {type !== 'transfer' && (
                             <View style={{ gap: 8 }}>
-                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Categoria</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Categoria</Text>
+                                    <TouchableOpacity onPress={() => { setShowNewCategory(!showNewCategory); setNewCategoryName(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                        <MaterialIcons name={showNewCategory ? 'close' : 'add'} size={16} color={c.primary} />
+                                        <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>{showNewCategory ? 'Annulla' : 'Nuova'}</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                {showNewCategory && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary, height: 44 }}>
+                                            <MaterialIcons name="category" size={16} color={c.textSecondary} style={{ marginLeft: 12 }} />
+                                            <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="Nome categoria..." placeholderTextColor={c.textMuted} value={newCategoryName} onChangeText={setNewCategoryName} autoFocus />
+                                        </View>
+                                        <TouchableOpacity
+                                            disabled={creatingCategory || !newCategoryName.trim()}
+                                            onPress={async () => {
+                                                if (!newCategoryName.trim()) return;
+                                                setCreatingCategory(true);
+                                                try {
+                                                    const res = await categoriesApi.create({ name: newCategoryName.trim() });
+                                                    const created = res.data?.data;
+                                                    if (created) { setCategories(prev => [...prev, created]); setCategoryName(created.attributes.name); }
+                                                    setShowNewCategory(false); setNewCategoryName('');
+                                                } catch (e) { Alert.alert('Errore', 'Impossibile creare la categoria'); }
+                                                finally { setCreatingCategory(false); }
+                                            }}
+                                            style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: !newCategoryName.trim() ? 0.5 : 1 }}
+                                        >
+                                            {creatingCategory ? <ActivityIndicator size="small" color="white" /> : <MaterialIcons name="check" size={20} color="white" />}
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                                     <TouchableOpacity style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: !categoryName ? c.primary : c.border, backgroundColor: !categoryName ? c.primary : c.bgCard }} onPress={() => setCategoryName('')}>
                                         <Text style={{ color: !categoryName ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>Nessuna</Text>
@@ -205,19 +340,121 @@ export default function NewRecurringScreen() {
                             </ScrollView>
                         </View>
 
-                        {/* Dates */}
-                        {[
-                            { label: 'Prima occorrenza', icon: 'event', value: firstDate, set: setFirstDate, placeholder: 'YYYY-MM-DD' },
-                            { label: 'Data fine (opzionale)', icon: 'event-busy', value: endDate, set: setEndDate, placeholder: 'YYYY-MM-DD' },
-                        ].map(f => (
-                            <View key={f.label} style={{ gap: 8 }}>
-                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>{f.label}</Text>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
-                                    <MaterialIcons name={f.icon as any} size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
-                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder={f.placeholder} placeholderTextColor={c.textMuted} value={f.value} onChangeText={f.set} />
+                        {/* First occurrence */}
+                        <View style={{ gap: 8 }}>
+                            <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Prima occorrenza</Text>
+                            <View style={{ flexDirection: 'row', gap: 10 }}>
+                                <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                    <MaterialIcons name="event" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="YYYY-MM-DD" placeholderTextColor={c.textMuted} value={firstDate} onChangeText={setFirstDate} />
+                                </View>
+                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                    <MaterialIcons name="access-time" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="HH:MM" placeholderTextColor={c.textMuted} value={firstTime} onChangeText={setFirstTime} keyboardType="numbers-and-punctuation" />
                                 </View>
                             </View>
-                        ))}
+                        </View>
+
+                        {/* End date */}
+                        <View style={{ gap: 8 }}>
+                            <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Data fine (opzionale)</Text>
+                            <View style={{ flexDirection: 'row', gap: 10 }}>
+                                <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                    <MaterialIcons name="event-busy" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }} placeholder="YYYY-MM-DD" placeholderTextColor={c.textMuted} value={endDate} onChangeText={setEndDate} />
+                                </View>
+                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: endDate ? c.border : c.border, height: 52, opacity: endDate ? 1 : 0.4 }}>
+                                    <MaterialIcons name="access-time" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                    <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="HH:MM" placeholderTextColor={c.textMuted} value={endTime} onChangeText={setEndTime} keyboardType="numbers-and-punctuation" editable={!!endDate} />
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* Nr of repetitions — solo se no data fine */}
+                        {!endDate && (
+                            <View style={{ gap: 8 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Numero di ripetizioni</Text>
+                                    <Text style={{ color: c.textMuted, fontSize: 11 }}>0 = infinito</Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.border, height: 52 }}>
+                                        <MaterialIcons name="repeat" size={18} color={c.textSecondary} style={{ marginLeft: 14 }} />
+                                        <TextInput
+                                            style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 10, height: '100%' }}
+                                            placeholder="0"
+                                            placeholderTextColor={c.textMuted}
+                                            value={nrOfRepetitions}
+                                            onChangeText={v => setNrOfRepetitions(v.replace(/[^0-9]/g, ''))}
+                                            keyboardType="number-pad"
+                                        />
+                                    </View>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, alignItems: 'center' }}>
+                                        {['0','6','12','24','52'].map(n => (
+                                            <TouchableOpacity key={n}
+                                                style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: nrOfRepetitions === n ? c.primary : c.border, backgroundColor: nrOfRepetitions === n ? c.primary : c.bgCard }}
+                                                onPress={() => setNrOfRepetitions(n)}
+                                            >
+                                                <Text style={{ color: nrOfRepetitions === n ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>{n === '0' ? '∞' : n}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Tags */}
+                        <View style={{ gap: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <Text style={{ color: c.textSecondary, fontSize: 13, fontWeight: '600' }}>Tag</Text>
+                                <TouchableOpacity onPress={() => { setShowNewTag(!showNewTag); setNewTagName(''); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <MaterialIcons name={showNewTag ? 'close' : 'add'} size={16} color={c.primary} />
+                                    <Text style={{ color: c.primary, fontSize: 12, fontWeight: '600' }}>{showNewTag ? 'Annulla' : 'Nuovo'}</Text>
+                                </TouchableOpacity>
+                            </View>
+                            {showNewTag && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: c.inputBg, borderRadius: 12, borderWidth: 1, borderColor: c.primary, height: 44 }}>
+                                        <MaterialIcons name="sell" size={16} color={c.textSecondary} style={{ marginLeft: 12 }} />
+                                        <TextInput style={{ flex: 1, color: c.text, fontSize: 14, paddingHorizontal: 8, height: '100%' }} placeholder="Nome tag..." placeholderTextColor={c.textMuted} value={newTagName} onChangeText={setNewTagName} autoFocus />
+                                    </View>
+                                    <TouchableOpacity
+                                        disabled={creatingTag || !newTagName.trim()}
+                                        onPress={async () => {
+                                            if (!newTagName.trim()) return;
+                                            setCreatingTag(true);
+                                            try {
+                                                const res = await tagsApi.create({ tag: newTagName.trim() });
+                                                const created = res.data?.data;
+                                                if (created) {
+                                                    setAvailableTags(prev => [...prev, created]);
+                                                    setSelectedTags(prev => [...prev, created.attributes.tag]);
+                                                }
+                                                setShowNewTag(false); setNewTagName('');
+                                            } catch (e) { Alert.alert('Errore', 'Impossibile creare il tag'); }
+                                            finally { setCreatingTag(false); }
+                                        }}
+                                        style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', opacity: !newTagName.trim() ? 0.5 : 1 }}
+                                    >
+                                        {creatingTag ? <ActivityIndicator size="small" color="white" /> : <MaterialIcons name="check" size={20} color="white" />}
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                                {availableTags.map(tag => {
+                                    const tagName: string = tag.attributes.tag;
+                                    const selected = selectedTags.includes(tagName);
+                                    return (
+                                        <TouchableOpacity key={tag.id}
+                                            style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: selected ? c.primary : c.border, backgroundColor: selected ? c.primary : c.bgCard }}
+                                            onPress={() => setSelectedTags(prev => selected ? prev.filter(t => t !== tagName) : [...prev, tagName])}
+                                        >
+                                            <Text style={{ color: selected ? 'white' : c.textSecondary, fontSize: 13, fontWeight: '600' }}>#{tagName}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
 
                         {/* Notes */}
                         <View style={{ gap: 8 }}>
